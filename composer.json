@@ -1,8 +1,7 @@
 {
-  "name": "kuzmany/mautic-addressvalidator-bundle",
+  "name": "kuzmany/mautic-address-validator-bundle",
   "type": "mautic-plugin",
   "require": {
     "mautic/composer-plugin": "^1.0"
   }
 }
-
