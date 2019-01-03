@@ -161,7 +161,7 @@ else:
 <div id="mauticformmessage-wrap"><div class="mauticform-error" id="mauticform{$formName}_error"></div><div class="mauticform-message" id="mauticform{$formName}_message"></div></div>
  <input  class="addressvalidatorid" name="addressvalidatorid" value="{$field['form']->getId()}" type="hidden" /> 
  <input  class="addressvalidatorname" name="addressvalidatorname" value="{$formNameWithout_}" type="hidden" />
-<script type="text/javascript" src="{$view['router']->url('mautic_addressvalidator_js')}"></script>
+<script async defer  type="text/javascript" src="{$view['router']->url('mautic_addressvalidator_js')}"></script>
 HTML;
 
 endif;
