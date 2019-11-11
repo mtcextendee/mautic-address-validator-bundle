@@ -79,7 +79,9 @@ class FormSubscriber extends CommonSubscriber
             FormEvents::FORM_ON_BUILD                       => ['onFormBuilder', 0],
             FormEvents::FORM_ON_SUBMIT                      => ['onFormSubmit', 0],
             AddressValidatorEvents::ON_FORM_VALIDATE_ACTION => ['onFormValidate', 0],
-            PluginEvents::ON_FORM_SUBMIT_ACTION_TRIGGERED => ['onPluginFormSubmitActionTriggered', 1000], //  update lead before plugin actions are executed
+            FormEvents::ON_EXECUTE_SUBMIT_ACTION => [
+                ['onFormSubmitTokensUpdate', 1000],
+            ],
         ];
     }
 
@@ -102,11 +104,18 @@ class FormSubscriber extends CommonSubscriber
         $repo             = $this->submissionModel->getRepository();
         $resultsTableName = $repo->getResultsTableName($form->getId(), $form->getAlias());
         $tableKeys        = ['submission_id' => $submission->getId()];
-
         foreach ($event->getFields() as $field) {
             if ($field['type'] == 'plugin.addressvalidator') {
                 $addressValidatorFieldAlias = $field['alias'];
                 $data                       = $event->getRequest()->get('mauticform')[$addressValidatorFieldAlias];
+                if (!isset($data['addressvalidated'])) {
+                    foreach ($fields as $f) {
+                        if ($f->getId() == $field['id']) {
+                          //  $data = $this->setValidateAddress($f, $data);
+                        break;
+                        }
+                    }
+                }
                 if (empty($data['addressvalidated'])) {
                     $data['addressvalidated'] = 'No';
                 }
@@ -224,6 +233,7 @@ class FormSubscriber extends CommonSubscriber
         }
     }
 
+
     public function setValidateAddress(\Mautic\FormBundle\Entity\Field $field, $data)
     {
         if ($field->getType() == 'plugin.addressvalidator') {
@@ -287,7 +297,6 @@ class FormSubscriber extends CommonSubscriber
 
         if ($field->getType() == 'plugin.addressvalidator') {
             $data = $event->getValue();
-
             // spam detection
             if (!empty($data['address4'])) {
                 return $event->failedValidation(
@@ -336,12 +345,17 @@ class FormSubscriber extends CommonSubscriber
                         return $event->failedValidation(
                             $this->translator->trans('plugin.addressvalidator.address.is.not.valid')
                         );
-                    } elseif ($result['status'] == 'SUSPECT' || ($result['status'] == 'VALID' && $data['addressvalidated']!='Yes')) {
+                    } elseif ($result['status'] == 'SUSPECT' || ($result['status'] == 'VALID' && isset($data['addressvalidated']) && $data['addressvalidated']!='Yes')) {
                         if (!isset($data['correctedaddress'])) {
                             return $event->failedValidation(
                                 \GuzzleHttp\json_encode($result)
                             );
                         }
+                    }elseif ($result['status'] == 'VALID' && (!isset($data['addressvalidated']) || $data['addressvalidated']!='Yes')){
+                        $normalizeAddress = $this->setValidateAddress($field, $data);
+                        $results = $this->request->request->all()['mauticform'];
+                        $results[$field->getAlias()] = $normalizeAddress;
+                        $this->request->request->set('mauticform', $results);
                     }
                 } else {
                     return $event->failedValidation(
@@ -353,52 +367,20 @@ class FormSubscriber extends CommonSubscriber
     }
 
     /**
-     * onFormSubmitActionTriggered - update Lead after address validtor passed
-     *
      * @param SubmissionEvent $event
-     *
-     * @return mixed
      */
-    public function onPluginFormSubmitActionTriggered(SubmissionEvent $event)
+    public function onFormSubmitTokensUpdate(SubmissionEvent $event)
     {
-        $form = $event->getSubmission()->getForm();
-        $fields = $form->getFields();
-        $lead = $event->getLead();
-
-        // update form results
-        foreach ($event->getFields() as $field) {
+        $fields = $event->getFields();
+        $tokens = $event->getTokens();
+        foreach ($fields as $field) {
             if ($field['type'] == 'plugin.addressvalidator') {
-                $addressValidatorFieldAlias = $field['alias'];
-                $data = $event->getRequest()->get('mauticform')[$addressValidatorFieldAlias];
-                if (empty($data['addressvalidated'])) {
-                    $data['addressvalidated'] = 'No';
-                }
-                /* @var \Mautic\FormBundle\Entity\Field $f */
-                if (!empty($data)) {
-                    foreach ($fields as $f) {
-                        if ($f->getAlias() == $addressValidatorFieldAlias) {
-                            $props = [];
-                            foreach ($f->getProperties() as $key => $property) {
-                                if (strpos($key, 'label') !== false || strpos($key, 'leadField') !== false) {
-                                    $newKey = strtolower(str_ireplace(['label', 'leadField'], ['', ''], $key));
-                                    if ($newKey) {
-                                        $props[$newKey][str_ireplace($newKey, '', $key)] = $property;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    $matchedFields = [];
-                    foreach ($data as $key => $value) {
-                        if (in_array($key, array_keys($props)) && isset($props[$key]['leadField'])) {
-                            $matchLeadField = $props[$key]['leadField'];
-                            if ($matchLeadField) {
-                                $matchedFields[$matchLeadField] = $value;
-                            }
-                        }
-                    }
-                    $this->leadModel->setFieldValues($lead, $matchedFields, true);
+                if (isset($tokens["{formfield={$field['alias']}}"])) {
+                    $addressValidatorFieldAlias = $field['alias'];
+                    $newValue = $event->getRequest()->get('mauticform')[$addressValidatorFieldAlias];
+                    $tokens["{formfield={$field['alias']}}"] =   implode(', ', $newValue);
+                    $event->setTokens($tokens);
+                    return;
                 }
             }
         }
