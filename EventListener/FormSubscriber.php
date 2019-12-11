@@ -13,6 +13,7 @@ namespace MauticPlugin\MauticAddressValidatorBundle\EventListener;
 
 use Mautic\CoreBundle\EventListener\CommonSubscriber;
 use Mautic\CoreBundle\Helper\CoreParametersHelper;
+use Mautic\FormBundle\Entity\Field;
 use Mautic\FormBundle\Event as Events;
 use Mautic\FormBundle\Event\FormBuilderEvent;
 use Mautic\FormBundle\Event\SubmissionEvent;
@@ -79,7 +80,7 @@ class FormSubscriber extends CommonSubscriber
             FormEvents::FORM_ON_BUILD                       => ['onFormBuilder', 0],
             FormEvents::FORM_ON_SUBMIT                      => ['onFormSubmit', 0],
             AddressValidatorEvents::ON_FORM_VALIDATE_ACTION => ['onFormValidate', 0],
-            FormEvents::ON_EXECUTE_SUBMIT_ACTION => [
+            PluginEvents::ON_FORM_SUBMIT_ACTION_TRIGGERED            => [
                 ['onFormSubmitTokensUpdate', 1000],
             ],
         ];
@@ -104,6 +105,7 @@ class FormSubscriber extends CommonSubscriber
         $repo             = $this->submissionModel->getRepository();
         $resultsTableName = $repo->getResultsTableName($form->getId(), $form->getAlias());
         $tableKeys        = ['submission_id' => $submission->getId()];
+
         foreach ($event->getFields() as $field) {
             if ($field['type'] == 'plugin.addressvalidator') {
                 $addressValidatorFieldAlias = $field['alias'];
@@ -111,8 +113,8 @@ class FormSubscriber extends CommonSubscriber
                 if (!isset($data['addressvalidated'])) {
                     foreach ($fields as $f) {
                         if ($f->getId() == $field['id']) {
-                          //  $data = $this->setValidateAddress($f, $data);
-                        break;
+                            //  $data = $this->setValidateAddress($f, $data);
+                            break;
                         }
                     }
                 }
@@ -135,6 +137,7 @@ class FormSubscriber extends CommonSubscriber
                                     }
                                 }
                             }
+                            break;
                         }
                     }
 
@@ -179,8 +182,11 @@ class FormSubscriber extends CommonSubscriber
 
                     $this->leadModel->setFieldValues($lead, $matchedFields, true);
                     // update addres field
-                    $results[$addressValidatorFieldAlias] = $results[$addressValidatorFieldAlias] = http_build_query($data,
-                        ',', '|');
+                    $results[$addressValidatorFieldAlias] = $results[$addressValidatorFieldAlias] = http_build_query(
+                        $data,
+                        ',',
+                        '|'
+                    );
                     $this->em
                         ->getConnection()
                         ->update($resultsTableName, $results, $tableKeys);
@@ -189,7 +195,7 @@ class FormSubscriber extends CommonSubscriber
         }
 
         /** Lead $lead */
-        if(!empty($lead->getChanges())) {
+        if (!empty($lead->getChanges())) {
             $this->leadModel->saveEntity($lead);
         }
     }
@@ -203,9 +209,9 @@ class FormSubscriber extends CommonSubscriber
     {
         if ($this->addressValidatorHelper->validation(true)) {
             $action = [
-                'label'       => 'mautic.plugin.field.addressvalidator',
-                'formType'    => 'addressvalidator',
-                'template'    => 'MauticAddressValidatorBundle:SubscribedEvents\Field:addressvalidator.html.php',
+                'label'          => 'mautic.plugin.field.addressvalidator',
+                'formType'       => 'addressvalidator',
+                'template'       => 'MauticAddressValidatorBundle:SubscribedEvents\Field:addressvalidator.html.php',
                 'builderOptions' => [
                     'addLeadFieldList'       => false,
                     'addDefaultValue'        => false,
@@ -271,8 +277,12 @@ class FormSubscriber extends CommonSubscriber
 
             // if valid, continue replace values before save and trigger actions
             if (!empty($result)) {
-                foreach ($data as $key=>$value) {
-                    $serviceReponseKey = str_replace(['address1', 'address2', 'zip'], ['addressline1', 'addressline2', 'postalcode'], $key);
+                foreach ($data as $key => $value) {
+                    $serviceReponseKey = str_replace(
+                        ['address1', 'address2', 'zip'],
+                        ['addressline1', 'addressline2', 'postalcode'],
+                        $key
+                    );
                     if (!in_array($key, ['toogle', 'addressvalidated', 'address4'])) {
                         $data[$key] = $result[$serviceReponseKey];
                     }
@@ -331,9 +341,11 @@ class FormSubscriber extends CommonSubscriber
                 $hashId = md5(serialize($event->getValue()));
                 // If we can get results from cache, try agaign
                 if (empty(self::$validationResults[$hashId])) {
-                    $values                           = $this->addressValidatorHelper->parseDataFromRequest($event->getValue());
+                    $values                           = $this->addressValidatorHelper->parseDataFromRequest(
+                        $event->getValue()
+                    );
                     $result                           = $this->addressValidatorHelper->validation(false, null, $values);
-                    $result                              = \GuzzleHttp\json_decode($result, true);
+                    $result                           = \GuzzleHttp\json_decode($result, true);
                     self::$validationResults[$hashId] = $result;
                 }
                 if (!empty(self::$validationResults[$hashId])) {
@@ -345,15 +357,15 @@ class FormSubscriber extends CommonSubscriber
                         return $event->failedValidation(
                             $this->translator->trans('plugin.addressvalidator.address.is.not.valid')
                         );
-                    } elseif ($result['status'] == 'SUSPECT' || ($result['status'] == 'VALID' && isset($data['addressvalidated']) && $data['addressvalidated']!='Yes')) {
+                    } elseif ($result['status'] == 'SUSPECT' || ($result['status'] == 'VALID' && isset($data['addressvalidated']) && $data['addressvalidated'] != 'Yes')) {
                         if (!isset($data['correctedaddress'])) {
                             return $event->failedValidation(
                                 \GuzzleHttp\json_encode($result)
                             );
                         }
-                    }elseif ($result['status'] == 'VALID' && (!isset($data['addressvalidated']) || $data['addressvalidated']!='Yes')){
-                        $normalizeAddress = $this->setValidateAddress($field, $data);
-                        $results = $this->request->request->all()['mauticform'];
+                    } elseif ($result['status'] == 'VALID' && (!isset($data['addressvalidated']) || $data['addressvalidated'] != 'Yes')) {
+                        $normalizeAddress            = $this->setValidateAddress($field, $data);
+                        $results                     = $this->request->request->all()['mauticform'];
                         $results[$field->getAlias()] = $normalizeAddress;
                         $this->request->request->set('mauticform', $results);
                     }
@@ -373,16 +385,73 @@ class FormSubscriber extends CommonSubscriber
     {
         $fields = $event->getFields();
         $tokens = $event->getTokens();
+        $lead   = $event->getLead();
+        $submission = $event->getSubmission();
+        $fieldMatches = $event->getContactFieldMatches();
         foreach ($fields as $field) {
             if ($field['type'] == 'plugin.addressvalidator') {
+                $matchedFields = $this->getAddressMatchedFields($event->getForm()->getFields(), $field);
+                $this->leadModel->setFieldValues($lead, $matchedFields);
+                if (!empty($lead->getChanges())) {
+                    $this->leadModel->saveEntity($lead);
+                }
                 if (isset($tokens["{formfield={$field['alias']}}"])) {
-                    $addressValidatorFieldAlias = $field['alias'];
-                    $newValue = $event->getRequest()->get('mauticform')[$addressValidatorFieldAlias];
-                    $tokens["{formfield={$field['alias']}}"] =   implode(', ', $newValue);
+                    $addressValidatorFieldAlias              = $field['alias'];
+                    $newValue                                = $event->getRequest()->get(
+                        'mauticform'
+                    )[$addressValidatorFieldAlias];
+                    $tokens["{formfield={$field['alias']}}"] = implode(', ', $newValue);
                     $event->setTokens($tokens);
                     return;
                 }
             }
+        }
+    }
+
+    /**
+     * @param       $fields
+     * @param array $field
+     *
+     * @return array
+     */
+    private function getAddressMatchedFields($fields, array $field)
+    {
+        $addressValidatorFieldAlias = $field['alias'];
+        $data                       = $this->request->get('mauticform')[$addressValidatorFieldAlias];
+
+        if (empty($data['addressvalidated'])) {
+            $data['addressvalidated'] = 'No';
+        }
+
+        $dataValues = array_filter($data);
+
+        if (!empty($data)) {
+            /** @var Field $f */
+            foreach ($fields as $f) {
+                if ($f->getAlias() == $addressValidatorFieldAlias) {
+                    $props = [];
+                    foreach ($f->getProperties() as $key => $property) {
+                        if (strpos($key, 'label') !== false || strpos($key, 'leadField') !== false) {
+                            $newKey = strtolower(str_ireplace(['label', 'leadField'], ['', ''], $key));
+                            if ($newKey) {
+                                $props[$newKey][str_ireplace($newKey, '', $key)] = $property;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+
+            $matchedFields = [];
+            foreach ($data as $key => $value) {
+                if (in_array($key, array_keys($props)) && isset($props[$key]['leadField'])) {
+                    $matchLeadField = $props[$key]['leadField'];
+                    if ($matchLeadField) {
+                        $matchedFields[$matchLeadField] = $value;
+                    }
+                }
+            }
+            return $matchedFields;
         }
     }
 }
